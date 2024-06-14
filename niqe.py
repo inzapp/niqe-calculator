@@ -2,11 +2,15 @@ import os
 import cv2
 import math
 import scipy
+import argparse
 import numpy as np
+
+from glob import glob
+from tqdm import tqdm
 
 
 class NIQECalculator:
-    def __init__(self, patch_size=96, params_path='params.mat'):
+    def __init__(self, patch_size='auto', params_path='params.mat'):
         self.patch_size = patch_size
         self.params_path = params_path
 
@@ -46,8 +50,8 @@ class NIQECalculator:
           r_hat = np.inf
         rhat_norm = r_hat * (((math.pow(gamma_hat, 3) + 1)*(gamma_hat + 1)) / math.pow(math.pow(gamma_hat, 2) + 1, 2))
 
-        #solve alpha by guessing values that minimize ro
-        pos = np.argmin((self.prec_gammas - rhat_norm)**2);
+        # solve alpha by guessing values that minimize ro
+        pos = np.argmin((self.prec_gammas - rhat_norm) ** 2);
         alpha = self.gamma_range[pos]
 
         gam1 = scipy.special.gamma(1.0/alpha)
@@ -59,7 +63,7 @@ class NIQECalculator:
         br = aggdratio * right_mean_sqrt
 
         # mean parameter
-        N = (br - bl)*(gam2 / gam1)#*aggdratio
+        N = (br - bl) * (gam2 / gam1)
         return (alpha, N, bl, br, left_mean_sqrt, right_mean_sqrt)
 
     # def ggd_features(self, imdata):
@@ -177,6 +181,14 @@ class NIQECalculator:
     def get_patches_test_features(self, img, patch_size, stride=8):
         return self._get_patches_generic(img, patch_size, 0, stride)
 
+    def get_auto_patch_size(self, img_w, img_h):
+        assert img_w >= 18 and img_h >= 18, 'image size must be over than 18x18'
+        patch_sizes = [96, 64, 48, 32, 16, 8]
+        for patch_size in patch_sizes:
+            if img_w > (patch_size * 2 + 1) and img_h > (patch_size * 2 + 1):
+                return patch_size
+        return -1
+
     def niqe(self, img):
         if self.params is None:
             self.params = scipy.io.loadmat(self.params_path)
@@ -186,11 +198,11 @@ class NIQECalculator:
             img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
         M, N = img.shape[:2]
-        # assert C == 1, "niqe called with videos containing %d channels. Please supply only the luminance channel" % (C,)
-        assert M > (self.patch_size*2+1), f"niqe called with small frame size, requires > {self.patch_size * 2}x{self.patch_size * 2} resolution video using current training parameters"
-        assert N > (self.patch_size*2+1), f"niqe called with small frame size, requires > {self.patch_size * 2}x{self.patch_size * 2} resolution video using current training parameters"
+        patch_size = self.get_auto_patch_size(N, M) if self.patch_size == 'auto' else self.patch_size
+        assert M > (patch_size * 2 + 1), f'niqe called with small frame size, requires > {self.patch_size * 2}x{self.patch_size * 2} resolution video using current training parameters'
+        assert N > (patch_size * 2 + 1), f'niqe called with small frame size, requires > {self.patch_size * 2}x{self.patch_size * 2} resolution video using current training parameters'
 
-        feats = self.get_patches_test_features(img, self.patch_size)
+        feats = self.get_patches_test_features(img, patch_size)
         sample_mu = np.mean(feats, axis=0)
         sample_cov = np.cov(feats.T)
 
@@ -202,12 +214,15 @@ class NIQECalculator:
 
 
 if __name__ == '__main__':
-    from glob import glob
-    from tqdm import tqdm
-    niqe_calculator = NIQECalculator(patch_size=16)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--path', type=str, default='.', help='image path for calculate niqe score')
+    parser.add_argument('--r', action='store_true', help='find images recursively using given path')
+    args = parser.parse_args()
+    niqe_calculator = NIQECalculator()
     cnt = 0
     niqe_sum = 0.0
-    for path in tqdm(glob('**/*.jpg', recursive=True)):
+    paths = glob(f'{args.path}/**/*.jpg' if args.r else f'{args.path}.*.jpg', recursive=args.r)
+    for path in tqdm(paths):
         img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
         niqe_sum += niqe_calculator.niqe(img)
         cnt += 1

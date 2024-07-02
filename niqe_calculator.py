@@ -223,7 +223,7 @@ if __name__ == '__main__':
     niqe_sum = 0.0
     paths = glob(f'{args.path}/**/*.jpg' if args.r else f'{args.path}.*.jpg', recursive=args.r)
     for path in tqdm(paths):
-        img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+        img = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
         niqe_sum += niqe_calculator.niqe(img)
         cnt += 1
     if cnt > 0:
